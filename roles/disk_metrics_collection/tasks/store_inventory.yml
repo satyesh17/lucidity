@@ -1,0 +1,43 @@
+---
+- name: "Store instance inventory data"
+  block:
+    - name: "Prepare inventory data"
+      set_fact:
+        inventory_data:
+          instance_id: "{{ instance_id }}"
+          account_id: "{{ account_id }}"
+          account_name: "{{ account_name }}"
+          instance_type: "{{ instance_type }}"
+          platform: "{{ platform }}"
+          region: "{{ region }}"
+          private_ip: "{{ private_ip | default('N/A') }}"
+          tags: "{{ tags | default({}) }}"
+          last_updated: "{{ ansible_date_time.iso8601 }}"
+          monitoring_enabled: true
+          disk_metrics_count: "{{ collected_disk_metrics | length }}"
+          io_metrics_count: "{{ collected_io_metrics | length }}"
+
+    - name: "Store inventory in DynamoDB"
+      shell: |
+        aws dynamodb put-item \
+          --table-name "{{ inventory_table_name }}" \
+          --item '{
+            "instance_id": {"S": "{{ inventory_data.instance_id }}"},
+            "account_id": {"S": "{{ inventory_data.account_id }}"},
+            "account_name": {"S": "{{ inventory_data.account_name }}"},
+            "instance_type": {"S": "{{ inventory_data.instance_type }}"},
+            "platform": {"S": "{{ inventory_data.platform }}"},
+            "region": {"S": "{{ inventory_data.region }}"},
+            "private_ip": {"S": "{{ inventory_data.private_ip }}"},
+            "last_updated": {"S": "{{ inventory_data.last_updated }}"},
+            "monitoring_enabled": {"BOOL": {{ inventory_data.monitoring_enabled | lower }}},
+            "disk_metrics_count": {"N": "{{ inventory_data.disk_metrics_count }}"},
+            "io_metrics_count": {"N": "{{ inventory_data.io_metrics_count }}"}
+          }' \
+          --region "{{ inventory_table_region }}"
+      ignore_errors: true
+
+  rescue:
+    - name: "Handle inventory storage error"
+      debug:
+        msg: "Failed to store inventory data: {{ ansible_failed_result.msg }}"

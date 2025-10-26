@@ -1,0 +1,114 @@
+---
+- name: "Cross-Account Access and Instance Discovery"
+  block:
+    - name: "Display cross-account configuration"
+      debug:
+        msg: |
+          Configuring cross-account access:
+          - Management Account: {{ management_account_id }}
+          - Target Account: {{ account_id }}
+          - Role: {{ account_role }}
+          - External ID: {{ external_id }}
+
+    - name: "Verify AWS credentials are available"
+      command: aws sts get-caller-identity
+      register: caller_identity
+      changed_when: false
+
+    - name: "Display current AWS identity"
+      debug:
+        msg: "Current AWS identity: {{ caller_identity.stdout }}"
+
+    - name: "Assume cross-account role (if not management account)"
+      community.aws.sts_assume_role:
+        role_arn: "arn:aws:iam::{{ account_id }}:role/{{ account_role }}"
+        role_session_name: "ansible-disk-monitoring-{{ account_name }}-{{ ansible_date_time.iso8601_basic_short }}"
+        external_id: "{{ external_id }}"
+        duration_seconds: 3600
+      register: assumed_role_credentials
+      no_log: false
+      when: account_id != management_account_id
+
+    - name: "Store temporary credentials"
+      set_fact:
+        aws_access_key: "{{ assumed_role_credentials.sts_creds.access_key if account_id != management_account_id else omit }}"
+        aws_secret_key: "{{ assumed_role_credentials.sts_creds.secret_key if account_id != management_account_id else omit }}"
+        aws_session_token: "{{ assumed_role_credentials.sts_creds.session_token if account_id != management_account_id else omit }}"
+      no_log: true
+      when: account_id != management_account_id
+
+    - name: "Test cross-account access"
+      community.aws.ec2_instance_info:
+        region: "{{ regions[0] }}"
+        filters:
+          instance-state-name: running
+        aws_access_key: "{{ aws_access_key | default(omit) }}"
+        aws_secret_key: "{{ aws_secret_key | default(omit) }}"
+        aws_session_token: "{{ aws_session_token | default(omit) }}"
+      register: test_access
+
+    - name: "Discover EC2 instances across regions"
+      community.aws.ec2_instance_info:
+        region: "{{ item }}"
+        filters:
+          instance-state-name: running
+        aws_access_key: "{{ aws_access_key | default(omit) }}"
+        aws_secret_key: "{{ aws_secret_key | default(omit) }}"
+        aws_session_token: "{{ aws_session_token | default(omit) }}"
+      loop: "{{ regions }}"
+      register: discovered_instances
+
+    - name: "Filter and prepare SSM instances"
+      set_fact:
+        ssm_instances: "{{ discovered_instances.results | map(attribute='instances') | flatten }}"
+
+    - name: "Display discovered instances count"
+      debug:
+        msg: "Discovered {{ ssm_instances | length }} instances in account {{ account_name }}"
+
+    - name: "Add SSM-enabled instances to inventory"
+      add_host:
+        hostname: "{{ item.instance_id }}"
+        groups: 
+          - "{{ item.platform | default('linux') }}_instances"
+          - "account_{{ account_name }}"
+          - "region_{{ item.placement.availability_zone[:-1] | replace('-', '_') }}"
+        ansible_host: "{{ item.instance_id }}"
+        ansible_connection: "aws_ssm"
+        ansible_aws_ssm_bucket_name: "disk-monitoring-ssm-logs-{{ management_account_id }}"
+        ansible_aws_ssm_region: "{{ item.placement.availability_zone[:-1] }}"
+        ansible_user: "{{ 'ec2-user' if item.platform | default('linux') == 'linux' else 'Administrator' }}"
+        ansible_become: "{{ true if item.platform | default('linux') == 'linux' else false }}"
+        instance_id: "{{ item.instance_id }}"
+        instance_type: "{{ item.instance_type }}"
+        platform: "{{ item.platform | default('linux') }}"
+        private_ip: "{{ item.private_ip_address }}"
+        account_id: "{{ account_id }}"
+        account_name: "{{ account_name }}"
+        region: "{{ item.placement.availability_zone[:-1] }}"
+        tags: "{{ item.tags | default({}) }}"
+      loop: "{{ ssm_instances }}"
+      when: ssm_instances | length > 0
+
+  rescue:
+    - name: "Display detailed error information"
+      debug:
+        msg: |
+          Error Details:
+          - Account: {{ account_name | default('unknown') }}
+          - Account ID: {{ account_id | default('unknown') }}
+          - Error: {{ ansible_failed_result.msg | default('Unknown error') }}
+          - Failed Task: {{ ansible_failed_task.name | default('Unknown task') }}
+
+    - name: "Check if role exists in target account"
+      uri:
+        url: "https://iam.amazonaws.com/"
+        method: GET
+      ignore_errors: true
+      register: role_check
+
+    - name: "Fail with detailed error message"
+      fail:
+        msg: |
+          Cross-account access failed for account {{ account_name }}:
+          Error: {{ ansible_failed_result.msg | default('Unknown error') }}

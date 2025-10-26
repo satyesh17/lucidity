@@ -1,0 +1,103 @@
+---
+- name: "Test SSM Connection"
+  hosts: localhost
+  gather_facts: true
+  vars:
+    management_account_id: "741752824171"
+    dev_account_id: "193779369106"
+    external_id: "DiskMonitoring-CrossAccount-12345"
+    aws_region: "us-east-1"
+    
+  tasks:
+    - name: "Get management account instances"
+      community.aws.ec2_instance_info:
+        region: "{{ aws_region }}"
+        filters:
+          instance-state-name: running
+      register: mgmt_instances
+
+    - name: "Get dev account instances"
+      block:
+        - name: "Assume dev account role"
+          community.aws.sts_assume_role:
+            role_arn: "arn:aws:iam::{{ dev_account_id }}:role/DiskMonitoringCrossAccountRole"
+            role_session_name: "test-ssm-session"
+            external_id: "{{ external_id }}"
+            duration_seconds: 3600
+          register: dev_credentials
+
+        - name: "Get dev account instances"
+          community.aws.ec2_instance_info:
+            region: "{{ aws_region }}"
+            filters:
+              instance-state-name: running
+            aws_access_key: "{{ dev_credentials.sts_creds.access_key }}"
+            aws_secret_key: "{{ dev_credentials.sts_creds.secret_key }}"
+            aws_session_token: "{{ dev_credentials.sts_creds.session_token }}"
+          register: dev_instances
+
+    - name: "Display all discovered instances"
+      debug:
+        msg: |
+          Management Account Instances: {{ mgmt_instances.instances | length }}
+          {% for instance in mgmt_instances.instances %}
+          - {{ instance.instance_id }} ({{ instance.instance_type }})
+          {% endfor %}
+          
+          Dev Account Instances: {{ dev_instances.instances | length }}
+          {% for instance in dev_instances.instances %}
+          - {{ instance.instance_id }} ({{ instance.instance_type }})
+          {% endfor %}
+
+    - name: "Test SSM command on management instances"
+      amazon.aws.ssm_command:
+        instance_ids:
+          - "{{ item.instance_id }}"
+        document_name: "AWS-RunShellScript"
+        parameters:
+          commands:
+            - "echo 'SSM Test from Management Account - Instance: {{ item.instance_id }}'"
+            - "whoami"
+            - "uptime"
+        wait: true
+        wait_timeout: 60
+      register: mgmt_ssm_test
+      loop: "{{ mgmt_instances.instances }}"
+      ignore_errors: true
+
+    - name: "Display management SSM results"
+      debug:
+        msg: |
+          Instance: {{ item.item.instance_id }}
+          Status: {{ item.command.status }}
+          Output: {{ item.command.stdout }}
+      loop: "{{ mgmt_ssm_test.results }}"
+      when: item is not skipped
+
+    - name: "Test SSM command on dev instances"
+      amazon.aws.ssm_command:
+        instance_ids:
+          - "{{ item.instance_id }}"
+        document_name: "AWS-RunShellScript"
+        parameters:
+          commands:
+            - "echo 'SSM Test from Dev Account - Instance: {{ item.instance_id }}'"
+            - "whoami"
+            - "uptime"
+        aws_access_key: "{{ dev_credentials.sts_creds.access_key }}"
+        aws_secret_key: "{{ dev_credentials.sts_creds.secret_key }}"
+        aws_session_token: "{{ dev_credentials.sts_creds.session_token }}"
+        wait: true
+        wait_timeout: 60
+      register: dev_ssm_test
+      loop: "{{ dev_instances.instances }}"
+      ignore_errors: true
+
+    - name: "Display dev SSM results"
+      debug:
+        msg: |
+          Instance: {{ item.item.instance_id }}
+          Status: {{ item.command.status }}
+          Output: {{ item.command.stdout }}
+      loop: "{{ dev_ssm_test.results }}"
+      when: item is not skipped and dev_instances.instances | length > 0

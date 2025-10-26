@@ -1,0 +1,25 @@
+[defaults]
+inventory = inventory/hosts.yml
+host_key_checking = False
+timeout = 30
+log_path = ./logs/ansible.log
+gathering = smart
+fact_caching = jsonfile
+fact_caching_connection = /tmp/ansible_facts
+fact_caching_timeout = 3600
+collections_paths = ~/.ansible/collections
+library = ./library
+roles_path = ./roles
+force_color = True
+
+[privilege_escalation]
+become = True
+become_method = sudo
+become_user = root
+
+[ssh_connection]
+ssh_args = -o ControlMaster=auto -o ControlPersist=60s
+pipelining = True
+
+[defaults]
+deprecation_warnings=False

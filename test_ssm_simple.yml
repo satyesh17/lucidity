@@ -1,0 +1,90 @@
+---
+- name: "Test SSM Connection Simple"
+  hosts: localhost
+  gather_facts: true
+  vars:
+    management_account_id: "741752824171"
+    dev_account_id: "193779369106"
+    external_id: "DiskMonitoring-CrossAccount-12345"
+    aws_region: "us-east-1"
+    
+  tasks:
+    - name: "Get management account instances"
+      community.aws.ec2_instance_info:
+        region: "{{ aws_region }}"
+        filters:
+          instance-state-name: running
+      register: mgmt_instances
+
+    - name: "Display management instances"
+      debug:
+        msg: |
+          Found {{ mgmt_instances.instances | length }} instances in management account:
+          {% for instance in mgmt_instances.instances %}
+          - {{ instance.instance_id }} ({{ instance.instance_type }}) - {{ instance.state.name }}
+          {% endfor %}
+
+    - name: "Check SSM connectivity for management instances"
+      shell: |
+        aws ssm describe-instance-information \
+          --filters "Name=InstanceIds,Values={{ item.instance_id }}" \
+          --query 'InstanceInformationList[0].PingStatus' \
+          --output text --region {{ aws_region }}
+      register: mgmt_ssm_status
+      loop: "{{ mgmt_instances.instances }}"
+      changed_when: false
+
+    - name: "Display management SSM status"
+      debug:
+        msg: "Instance {{ item.item.instance_id }}: SSM Status = {{ item.stdout }}"
+      loop: "{{ mgmt_ssm_status.results }}"
+
+    - name: "Get dev account instances"
+      block:
+        - name: "Assume dev account role"
+          community.aws.sts_assume_role:
+            role_arn: "arn:aws:iam::{{ dev_account_id }}:role/DiskMonitoringCrossAccountRole"
+            role_session_name: "test-ssm-session"
+            external_id: "{{ external_id }}"
+            duration_seconds: 3600
+          register: dev_credentials
+
+        - name: "Get dev account instances"
+          community.aws.ec2_instance_info:
+            region: "{{ aws_region }}"
+            filters:
+              instance-state-name: running
+            aws_access_key: "{{ dev_credentials.sts_creds.access_key }}"
+            aws_secret_key: "{{ dev_credentials.sts_creds.secret_key }}"
+            aws_session_token: "{{ dev_credentials.sts_creds.session_token }}"
+          register: dev_instances
+
+        - name: "Display dev instances"
+          debug:
+            msg: |
+              Found {{ dev_instances.instances | length }} instances in dev account:
+              {% for instance in dev_instances.instances %}
+              - {{ instance.instance_id }} ({{ instance.instance_type }}) - {{ instance.state.name }}
+              {% endfor %}
+
+        - name: "Check SSM connectivity for dev instances"
+          shell: |
+            AWS_ACCESS_KEY_ID={{ dev_credentials.sts_creds.access_key }} \
+            AWS_SECRET_ACCESS_KEY={{ dev_credentials.sts_creds.secret_key }} \
+            AWS_SESSION_TOKEN={{ dev_credentials.sts_creds.session_token }} \
+            aws ssm describe-instance-information \
+              --filters "Name=InstanceIds,Values={{ item.instance_id }}" \
+              --query 'InstanceInformationList[0].PingStatus' \
+              --output text --region {{ aws_region }}
+          register: dev_ssm_status
+          loop: "{{ dev_instances.instances }}"
+          changed_when: false
+
+        - name: "Display dev SSM status"
+          debug:
+            msg: "Instance {{ item.item.instance_id }}: SSM Status = {{ item.stdout }}"
+          loop: "{{ dev_ssm_status.results }}"
+      rescue:
+        - name: "Handle dev account access error"
+          debug:
+            msg: "Cannot access dev account: {{ ansible_failed_result.msg }}"

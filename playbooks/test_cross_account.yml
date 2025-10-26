@@ -1,0 +1,70 @@
+---
+- name: "Test Cross-Account Access"
+  hosts: localhost
+  gather_facts: true  # Changed from false to true
+  vars:
+    management_account_id: "741752824171"
+    dev_account_id: "193779369106"
+    external_id: "DiskMonitoring-CrossAccount-12345"
+    
+  tasks:
+    - name: "Test management account access"
+      block:
+        - name: "Get current caller identity"
+          command: aws sts get-caller-identity
+          register: current_identity
+          changed_when: false
+
+        - name: "Display current identity"
+          debug:
+            var: current_identity.stdout
+
+        - name: "Test EC2 access in management account"
+          community.aws.ec2_instance_info:
+            region: us-east-1
+            filters:
+              instance-state-name: running
+          register: mgmt_instances
+
+        - name: "Display management account instances"
+          debug:
+            msg: "Found {{ mgmt_instances.instances | length }} instances in management account"
+
+    - name: "Test cross-account role assumption"
+      block:
+        - name: "Generate unique session name"
+          set_fact:
+            session_name: "test-session-{{ ansible_date_time.epoch }}"
+
+        - name: "Assume role in dev account"
+          community.aws.sts_assume_role:
+            role_arn: "arn:aws:iam::{{ dev_account_id }}:role/DiskMonitoringCrossAccountRole"
+            role_session_name: "{{ session_name }}"
+            external_id: "{{ external_id }}"
+            duration_seconds: 3600
+          register: assumed_credentials
+
+        - name: "Test EC2 access in dev account"
+          community.aws.ec2_instance_info:
+            region: us-east-1
+            filters:
+              instance-state-name: running
+            aws_access_key: "{{ assumed_credentials.sts_creds.access_key }}"
+            aws_secret_key: "{{ assumed_credentials.sts_creds.secret_key }}"
+            aws_session_token: "{{ assumed_credentials.sts_creds.session_token }}"
+          register: dev_instances
+
+        - name: "Display dev account instances"
+          debug:
+            msg: "Found {{ dev_instances.instances | length }} instances in dev account"
+
+        - name: "Success message"
+          debug:
+            msg: "✅ Cross-account access is working correctly!"
+
+      rescue:
+        - name: "Display cross-account error"
+          debug:
+            msg: |
+              ❌ Cross-account access failed:
+              Error: {{ ansible_failed_result.msg }}

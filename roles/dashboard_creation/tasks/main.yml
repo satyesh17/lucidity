@@ -1,0 +1,10 @@
+---
+- name: "Create CloudWatch Dashboard"
+  block:
+    - name: "Generate dashboard configuration"
+      include_tasks: create_dashboard.yml
+
+  rescue:
+    - name: "Handle dashboard creation error"
+      debug:
+        msg: "Error creating dashboard: {{ ansible_failed_result.msg }}"

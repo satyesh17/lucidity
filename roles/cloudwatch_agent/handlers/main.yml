@@ -1,0 +1,13 @@
+---
+- name: restart cloudwatch agent linux
+  systemd:
+    name: amazon-cloudwatch-agent
+    state: restarted
+  become: yes
+  listen: "restart cloudwatch agent linux"
+
+- name: restart cloudwatch agent windows
+  win_service:
+    name: AmazonCloudWatchAgent
+    state: restarted
+  listen: "restart cloudwatch agent windows"

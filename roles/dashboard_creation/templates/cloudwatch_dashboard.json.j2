@@ -1,0 +1,136 @@
+{
+  "widgets": [
+    {
+      "type": "text",
+      "x": 0,
+      "y": 0,
+      "width": 24,
+      "height": 2,
+      "properties": {
+        "markdown": "# Disk Monitoring Dashboard\n\n**Management Account:** {{ management_account_id }} | **Dev Account:** {{ dev_account_id }} | **Total Instances:** {{ monitored_instances | length }}\n\n**Last Updated:** {{ ansible_date_time.iso8601 }}"
+      }
+    },
+    {
+      "type": "metric",
+      "x": 0,
+      "y": 2,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "metrics": [
+{% for instance in monitored_instances %}
+          [ "{{ cloudwatch_namespace }}", "DiskUsedPercent", "InstanceId", "{{ instance[0] }}" ]{% if not loop.last %},{% endif %}
+{% endfor %}
+        ],
+        "view": "timeSeries",
+        "stacked": false,
+        "region": "{{ management_region }}",
+        "title": "Disk Usage Percentage by Instance",
+        "period": {{ dashboard_period }},
+        "stat": "{{ dashboard_stat }}",
+        "yAxis": {
+          "left": {
+            "min": 0,
+            "max": 100
+          }
+        },
+        "annotations": {
+          "horizontal": [
+            {
+              "value": {{ disk_warning_threshold }},
+              "fill": "above",
+              "color": "#ff9900"
+            },
+            {
+              "value": {{ disk_critical_threshold }},
+              "fill": "above", 
+              "color": "#d62728"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "metric",
+      "x": 12,
+      "y": 2,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "metrics": [
+{% for instance in monitored_instances %}
+          [ "{{ cloudwatch_namespace }}", "DiskFreeBytes", "InstanceId", "{{ instance[0] }}" ]{% if not loop.last %},{% endif %}
+{% endfor %}
+        ],
+        "view": "timeSeries",
+        "stacked": false,
+        "region": "{{ management_region }}",
+        "title": "Free Disk Space (Bytes)",
+        "period": {{ dashboard_period }},
+        "stat": "{{ dashboard_stat }}"
+      }
+    },
+    {
+      "type": "metric",
+      "x": 0,
+      "y": 8,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "metrics": [
+{% for instance in monitored_instances %}
+          [ "{{ cloudwatch_namespace }}", "DiskReads", "InstanceId", "{{ instance[0] }}" ],
+          [ ".", "DiskWrites", ".", "." ]{% if not loop.last %},{% endif %}
+{% endfor %}
+        ],
+        "view": "timeSeries",
+        "stacked": false,
+        "region": "{{ management_region }}",
+        "title": "IOPS (Reads/Writes per Second)",
+        "period": {{ dashboard_period }},
+        "stat": "{{ dashboard_stat }}"
+      }
+    },
+    {
+      "type": "metric",
+      "x": 12,
+      "y": 8,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "metrics": [
+{% for instance in monitored_instances %}
+          [ "{{ cloudwatch_namespace }}", "DiskReadLatency", "InstanceId", "{{ instance[0] }}" ],
+          [ ".", "DiskWriteLatency", ".", "." ]{% if not loop.last %},{% endif %}
+{% endfor %}
+        ],
+        "view": "timeSeries",
+        "stacked": false,
+        "region": "{{ management_region }}",
+        "title": "Disk Latency (Milliseconds)",
+        "period": {{ dashboard_period }},
+        "stat": "{{ dashboard_stat }}"
+      }
+    },
+    {
+      "type": "metric",
+      "x": 0,
+      "y": 14,
+      "width": 24,
+      "height": 6,
+      "properties": {
+        "metrics": [
+{% for instance in monitored_instances %}
+          [ "AWS/EC2", "CPUUtilization", "InstanceId", "{{ instance[0] }}" ]{% if not loop.last %},{% endif %}
+{% endfor %}
+        ],
+        "view": "timeSeries",
+        "stacked": false,
+        "region": "{{ management_region }}",
+        "title": "CPU Utilization by Instance",
+        "period": {{ dashboard_period }},
+        "stat": "{{ dashboard_stat }}"
+      }
+    }
+  ]
+}

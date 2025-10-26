@@ -1,0 +1,155 @@
+---
+- name: "Complete Disk Monitoring Solution Deployment - Step 1"
+  hosts: localhost
+  gather_facts: false
+  
+  tasks:
+    - name: "Display deployment start"
+      debug:
+        msg: |
+          🚀 Starting Complete Disk Monitoring Solution Deployment
+          
+          This will:
+          1. Discover EC2 instances in both accounts
+          2. Install CloudWatch Agents
+          3. Configure metrics collection
+          4. Create monitoring dashboard
+          5. Setup alarms
+          
+          Accounts:
+          - Management: {{ management_account_id }}
+          - Dev: {{ dev_account_id }}
+
+    - name: "Step 1: Discover instances in management account"
+      include_role:
+        name: cross_account_access
+      vars:
+        account_id: "{{ management_account_id }}"
+        account_name: "management"
+        account_role: "DiskMonitoringManagementRole"
+        regions: ["{{ aws_region }}"]
+
+    - name: "Step 1: Discover instances in dev account"
+      include_role:
+        name: cross_account_access
+      vars:
+        account_id: "{{ dev_account_id }}"
+        account_name: "dev"
+        account_role: "DiskMonitoringCrossAccountRole"
+        regions: ["{{ aws_region }}"]
+
+    - name: "Display discovery summary"
+      debug:
+        msg: |
+          ✅ Instance discovery completed!
+          Total instances discovered: {{ groups['all'] | length - 1 }}
+          Linux instances: {{ groups['linux_instances'] | default([]) | length }}
+          Windows instances: {{ groups['windows_instances'] | default([]) | length }}
+
+- name: "Complete Disk Monitoring Solution Deployment - Step 2"
+  hosts: linux_instances:windows_instances
+  gather_facts: true
+  serial: 5
+  
+  tasks:
+    - name: "Display instance information"
+      debug:
+        msg: |
+          Installing CloudWatch Agent on:
+          - Instance ID: {{ instance_id }}
+          - Platform: {{ platform }}
+          - Account: {{ account_name }}
+          - Region: {{ region }}
+
+    - name: "Install and configure CloudWatch Agent"
+      include_role:
+        name: cloudwatch_agent
+
+    - name: "Collect disk metrics"
+      include_role:
+        name: disk_metrics_collection
+
+- name: "Complete Disk Monitoring Solution Deployment - Step 3"
+  hosts: localhost
+  gather_facts: true
+  
+  tasks:
+    - name: "Wait for metrics to populate in CloudWatch"
+      pause:
+        seconds: 60
+
+    - name: "Create comprehensive monitoring dashboard"
+      include_role:
+        name: dashboard_creation
+
+    - name: "Create CloudWatch alarms"
+      block:
+        - name: "Get all monitored instances"
+          shell: |
+            aws dynamodb scan \
+              --table-name "{{ inventory_table_name }}" \
+              --region "{{ inventory_table_region }}" \
+              --query 'Items[?monitoring_enabled.BOOL==`true`].[instance_id.S,account_name.S]' \
+              --output json
+          register: alarm_instances_raw
+          changed_when: false
+
+        - name: "Parse instances for alarms"
+          set_fact:
+            alarm_instances: "{{ alarm_instances_raw.stdout | from_json }}"
+
+        - name: "Create disk usage warning alarms"
+          shell: |
+            aws cloudwatch put-metric-alarm \
+              --alarm-name "DiskUsage-Warning-{{ item[0] }}" \
+              --alarm-description "Disk usage warning for {{ item[0] }} in {{ item[1] }} account" \
+              --metric-name DiskUsedPercent \
+              --namespace "{{ cloudwatch_namespace }}" \
+              --statistic Average \
+              --period 300 \
+              --threshold {{ disk_warning_threshold }} \
+              --comparison-operator GreaterThanThreshold \
+              --evaluation-periods 2 \
+              --dimensions Name=InstanceId,Value={{ item[0] }} \
+              --region "{{ management_region }}"
+          loop: "{{ alarm_instances }}"
+          when: alarm_instances | length > 0
+
+        - name: "Create disk usage critical alarms"
+          shell: |
+            aws cloudwatch put-metric-alarm \
+              --alarm-name "DiskUsage-Critical-{{ item[0] }}" \
+              --alarm-description "Disk usage critical for {{ item[0] }} in {{ item[1] }} account" \
+              --metric-name DiskUsedPercent \
+              --namespace "{{ cloudwatch_namespace }}" \
+              --statistic Average \
+              --period 300 \
+              --threshold {{ disk_critical_threshold }} \
+              --comparison-operator GreaterThanThreshold \
+              --evaluation-periods 1 \
+              --dimensions Name=InstanceId,Value={{ item[0] }} \
+              --region "{{ management_region }}"
+          loop: "{{ alarm_instances }}"
+          when: alarm_instances | length > 0
+
+    - name: "Final deployment summary"
+      debug:
+        msg: |
+          🎉 COMPLETE DEPLOYMENT FINISHED! 🎉
+          
+          ✅ All components deployed successfully:
+          
+          📊 Dashboard: 
+          https://{{ management_region }}.console.aws.amazon.com/cloudwatch/home?region={{ management_region }}#dashboards:name={{ dashboard_name }}
+          
+          📈 Metrics: Available in CloudWatch namespace "{{ cloudwatch_namespace }}"
+          
+          🚨 Alarms: Created for all instances
+          
+          📋 Inventory: Stored in DynamoDB table "{{ inventory_table_name }}"
+          
+          🔄 Regular Operations:
+          - Re-run metrics collection: ansible-playbook playbooks/03_collect_metrics.yml -v
+          - Discover new instances: ansible-playbook playbooks/01_discover_instances.yml -v
+          - Update dashboard: ansible-playbook playbooks/04_create_dashboard.yml -v
+

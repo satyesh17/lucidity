@@ -1,0 +1,47 @@
+---
+- name: "Collect detailed disk metrics on Linux"
+  block:
+    - name: "Get disk usage statistics"
+      shell: |
+        df -B1 | tail -n +2 | awk 'NF==6 {print $6, $3, $2, $4, int($3*100/$2)}' | while read mount used total avail used_pct; do
+          echo "MOUNT=$mount USED=$used TOTAL=$total AVAIL=$avail USED_PCT=$used_pct"
+        done
+      register: disk_stats
+      changed_when: false
+
+    - name: "Get I/O statistics (if iostat available)"
+      shell: |
+        if command -v iostat >/dev/null 2>&1; then
+          iostat -dx 1 2 | tail -n +4 | awk 'NF>=10 {print $1, $4, $5, $10}' | while read device r_sec w_sec util; do
+            echo "DEVICE=$device READ_SEC=$r_sec WRITE_SEC=$w_sec UTIL=$util"
+          done
+        else
+          echo "DEVICE=N/A READ_SEC=0 WRITE_SEC=0 UTIL=0"
+        fi
+      register: io_stats
+      changed_when: false
+
+    - name: "Get inode usage"
+      shell: |
+        df -i | tail -n +2 | awk 'NF==6 {print $6, $3, $2, $4}' | while read mount used total avail; do
+          echo "MOUNT=$mount INODES_USED=$used INODES_TOTAL=$total INODES_AVAIL=$avail"
+        done
+      register: inode_stats
+      changed_when: false
+
+    - name: "Store Linux metrics"
+      set_fact:
+        collected_disk_metrics: "{{ disk_stats.stdout_lines }}"
+        collected_io_metrics: "{{ io_stats.stdout_lines }}"
+        collected_inode_metrics: "{{ inode_stats.stdout_lines }}"
+
+  rescue:
+    - name: "Handle Linux metrics collection error"
+      debug:
+        msg: "Failed to collect Linux disk metrics: {{ ansible_failed_result.msg }}"
+      
+    - name: "Set empty metrics on error"
+      set_fact:
+        collected_disk_metrics: []
+        collected_io_metrics: []
+        collected_inode_metrics: []

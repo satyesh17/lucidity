@@ -1,0 +1,34 @@
+---
+- name: "Publish custom metrics to CloudWatch"
+  block:
+    - name: "Parse and publish disk usage metrics"
+      shell: |
+        aws cloudwatch put-metric-data \
+          --namespace "{{ cloudwatch_namespace }}" \
+          --metric-data MetricName=CustomDiskUsedPercent,Value={{ item.split('USED_PCT=')[1] }},Unit=Percent,Dimensions=InstanceId={{ instance_id }},MountPoint={{ item.split('MOUNT=')[1].split(' ')[0] }} \
+          --region {{ region }}
+      loop: "{{ collected_disk_metrics }}"
+      when: 
+        - collected_disk_metrics is defined
+        - collected_disk_metrics | length > 0
+        - "'USED_PCT=' in item"
+      ignore_errors: true
+
+    - name: "Publish IOPS metrics (if available)"
+      shell: |
+        aws cloudwatch put-metric-data \
+          --namespace "{{ cloudwatch_namespace }}" \
+          --metric-data MetricName=CustomIOPS,Value={{ (item.split('READ_SEC=')[1].split(' ')[0] | float) + (item.split('WRITE_SEC=')[1].split(' ')[0] | float) }},Unit=Count/Second,Dimensions=InstanceId={{ instance_id }},Device={{ item.split('DEVICE=')[1].split(' ')[0] }} \
+          --region {{ region }}
+      loop: "{{ collected_io_metrics }}"
+      when: 
+        - collected_io_metrics is defined
+        - collected_io_metrics | length > 0
+        - "'READ_SEC=' in item"
+        - "'WRITE_SEC=' in item"
+      ignore_errors: true
+
+  rescue:
+    - name: "Handle metrics publishing error"
+      debug:
+        msg: "Failed to publish custom metrics: {{ ansible_failed_result.msg }}"

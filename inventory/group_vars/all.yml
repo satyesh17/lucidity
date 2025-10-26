@@ -1,0 +1,42 @@
+---
+# AWS Configuration
+aws_cli_version: "2.13.0"
+boto3_version: "1.26.0"
+
+# Account Configuration
+management_account_id: "741752824171"
+dev_account_id: "193779369106"
+external_id: "DiskMonitoring-CrossAccount-12345"
+
+# AWS Region Configuration
+aws_region: "us-east-1"
+management_region: "us-east-1"
+
+# Monitoring Configuration
+cloudwatch_namespace: "DiskMonitoring"
+metrics_collection_interval: 60
+log_retention_days: 30
+
+# Thresholds for alerting
+disk_warning_threshold: 80
+disk_critical_threshold: 90
+iops_warning_threshold: 5000
+latency_warning_threshold_ms: 50
+
+# CloudWatch Agent Configuration
+cloudwatch_agent_version: "latest"
+cloudwatch_agent_config_bucket: "disk-monitoring-config-741752824171"
+cloudwatch_log_group: "/aws/diskmonitoring"
+
+# Retry configuration
+max_retries: 3
+retry_delay: 5
+
+# Inventory database
+inventory_table_name: "DiskMonitoringInventory"
+inventory_table_region: "us-east-1"
+
+# Dashboard configuration
+dashboard_name: "DiskMonitoring-Dashboard"
+dashboard_period: 300
+dashboard_stat: "Average"

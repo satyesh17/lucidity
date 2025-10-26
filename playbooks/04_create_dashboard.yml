@@ -1,0 +1,79 @@
+---
+- name: "Create CloudWatch Dashboard"
+  hosts: localhost
+  gather_facts: true
+  
+  tasks:
+    - name: "Create comprehensive monitoring dashboard"
+      include_role:
+        name: dashboard_creation
+
+    - name: "Create CloudWatch alarms"
+      block:
+        - name: "Get all monitored instances"
+          shell: |
+            aws dynamodb scan \
+              --table-name "{{ inventory_table_name }}" \
+              --region "{{ inventory_table_region }}" \
+              --query 'Items[?monitoring_enabled.BOOL==`true`].[instance_id.S,account_name.S]' \
+              --output json
+          register: alarm_instances_raw
+          changed_when: false
+
+        - name: "Parse instances for alarms"
+          set_fact:
+            alarm_instances: "{{ alarm_instances_raw.stdout | from_json }}"
+
+        - name: "Create disk usage warning alarms"
+          shell: |
+            aws cloudwatch put-metric-alarm \
+              --alarm-name "DiskUsage-Warning-{{ item[0] }}" \
+              --alarm-description "Disk usage warning for {{ item[0] }} in {{ item[1] }} account" \
+              --metric-name DiskUsedPercent \
+              --namespace "{{ cloudwatch_namespace }}" \
+              --statistic Average \
+              --period 300 \
+              --threshold {{ disk_warning_threshold }} \
+              --comparison-operator GreaterThanThreshold \
+              --evaluation-periods 2 \
+              --dimensions Name=InstanceId,Value={{ item[0] }} \
+              --region "{{ management_region }}"
+          loop: "{{ alarm_instances }}"
+          when: alarm_instances | length > 0
+
+        - name: "Create disk usage critical alarms"
+          shell: |
+            aws cloudwatch put-metric-alarm \
+              --alarm-name "DiskUsage-Critical-{{ item[0] }}" \
+              --alarm-description "Disk usage critical for {{ item[0] }} in {{ item[1] }} account" \
+              --metric-name DiskUsedPercent \
+              --namespace "{{ cloudwatch_namespace }}" \
+              --statistic Average \
+              --period 300 \
+              --threshold {{ disk_critical_threshold }} \
+              --comparison-operator GreaterThanThreshold \
+              --evaluation-periods 1 \
+              --dimensions Name=InstanceId,Value={{ item[0] }} \
+              --region "{{ management_region }}"
+          loop: "{{ alarm_instances }}"
+          when: alarm_instances | length > 0
+
+    - name: "Display completion summary"
+      debug:
+        msg: |
+          🎉 DISK MONITORING SOLUTION DEPLOYED SUCCESSFULLY! 🎉
+          
+          📊 Dashboard URL:
+          https://{{ management_region }}.console.aws.amazon.com/cloudwatch/home?region={{ management_region }}#dashboards:name={{ dashboard_name }}
+          
+          📈 Metrics Namespace: {{ cloudwatch_namespace }}
+          
+          🚨 Alarms Created:
+          - Warning threshold: {{ disk_warning_threshold }}%
+          - Critical threshold: {{ disk_critical_threshold }}%
+          
+          📋 Inventory Table: {{ inventory_table_name }}
+          
+          🔄 To collect metrics again: ansible-playbook playbooks/03_collect_metrics.yml -v
+          
+          ✅ Setup Complete!

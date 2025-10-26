@@ -1,0 +1,50 @@
+---
+- name: "Install CloudWatch Agents on All Discovered Instances"
+  hosts: linux_instances:windows_instances
+  gather_facts: true
+  serial: 5
+  
+  tasks:
+    - name: "Display instance information"
+      debug:
+        msg: |
+          Installing CloudWatch Agent on:
+          - Instance ID: {{ instance_id }}
+          - Platform: {{ platform }}
+          - Account: {{ account_name }}
+          - Region: {{ region }}
+
+    - name: "Install and configure CloudWatch Agent"
+      include_role:
+        name: cloudwatch_agent
+
+    - name: "Verify CloudWatch Agent installation"
+      block:
+        - name: "Check agent status (Linux)"
+          systemd:
+            name: amazon-cloudwatch-agent
+          register: agent_status_linux
+          when: platform == 'linux'
+
+        - name: "Check agent status (Windows)"
+          win_service:
+            name: AmazonCloudWatchAgent
+          register: agent_status_windows
+          when: platform == 'windows'
+
+        - name: "Display agent status"
+          debug:
+            msg: |
+              CloudWatch Agent Status:
+              - Instance: {{ instance_id }}
+              - Status: {{ 'Running' if (agent_status_linux.status.ActiveState == 'active' if platform == 'linux' else agent_status_windows.state == 'started') else 'Not Running' }}
+
+  post_tasks:
+    - name: "Installation summary"
+      debug:
+        msg: |
+          ✅ CloudWatch Agent installation completed!
+          
+          Next step: Start collecting metrics
+          Command: ansible-playbook playbooks/03_collect_metrics.yml -v
+      run_once: true

@@ -1,0 +1,42 @@
+---
+- name: "Create comprehensive CloudWatch dashboard"
+  block:
+    - name: "Get all monitored instances from DynamoDB"
+      shell: |
+        aws dynamodb scan \
+          --table-name "{{ inventory_table_name }}" \
+          --region "{{ inventory_table_region }}" \
+          --query 'Items[?monitoring_enabled.BOOL==`true`].[instance_id.S,account_name.S,region.S,platform.S]' \
+          --output json
+      register: monitored_instances_raw
+      changed_when: false
+
+    - name: "Parse monitored instances"
+      set_fact:
+        monitored_instances: "{{ monitored_instances_raw.stdout | from_json }}"
+
+    - name: "Generate dashboard JSON from template"
+      template:
+        src: cloudwatch_dashboard.json.j2
+        dest: "/tmp/dashboard_config.json"
+      delegate_to: localhost
+
+    - name: "Create CloudWatch dashboard"
+      shell: |
+        aws cloudwatch put-dashboard \
+          --dashboard-name "{{ dashboard_name }}" \
+          --dashboard-body file:///tmp/dashboard_config.json \
+          --region "{{ management_region }}"
+      register: dashboard_creation
+
+    - name: "Display dashboard URL"
+      debug:
+        msg: |
+          ✅ Dashboard created successfully!
+          Dashboard Name: {{ dashboard_name }}
+          URL: https://{{ management_region }}.console.aws.amazon.com/cloudwatch/home?region={{ management_region }}#dashboards:name={{ dashboard_name }}
+
+  rescue:
+    - name: "Handle dashboard creation error"
+      debug:
+        msg: "❌ Failed to create dashboard: {{ ansible_failed_result.msg }}"

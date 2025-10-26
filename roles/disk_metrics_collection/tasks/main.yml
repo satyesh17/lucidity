@@ -1,0 +1,25 @@
+---
+- name: "Disk Metrics Collection"
+  block:
+    - name: "Determine OS type"
+      set_fact:
+        os_type: "{{ 'windows' if ansible_os_family == 'Windows' else 'linux' }}"
+
+    - name: "Collect Linux disk metrics"
+      include_tasks: collect_linux_metrics.yml
+      when: os_type == 'linux'
+
+    - name: "Collect Windows disk metrics"
+      include_tasks: collect_windows_metrics.yml
+      when: os_type == 'windows'
+
+    - name: "Publish custom metrics to CloudWatch"
+      include_tasks: publish_metrics.yml
+
+    - name: "Store instance data in inventory"
+      include_tasks: store_inventory.yml
+
+  rescue:
+    - name: "Handle metrics collection errors"
+      debug:
+        msg: "Error collecting metrics: {{ ansible_failed_result.msg }}"

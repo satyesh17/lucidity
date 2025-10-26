@@ -1,0 +1,45 @@
+---
+- name: "Collect detailed disk metrics on Windows"
+  block:
+    - name: "Get disk usage via PowerShell"
+      win_shell: |
+        $disks = Get-WmiObject Win32_LogicalDisk -Filter "DriveType=3"
+        foreach ($disk in $disks) {
+          $used = $disk.Size - $disk.FreeSpace
+          $used_pct = if ($disk.Size -gt 0) { [math]::Round($used / $disk.Size * 100, 2) } else { 0 }
+          Write-Output "DRIVE=$($disk.DeviceID) USED=$used TOTAL=$($disk.Size) FREE=$($disk.FreeSpace) USED_PCT=$used_pct"
+        }
+      register: disk_stats_windows
+      changed_when: false
+
+    - name: "Get I/O performance counters"
+      win_shell: |
+        try {
+          $counters = Get-Counter -Counter "\PhysicalDisk(_Total)\Disk Bytes/sec", "\PhysicalDisk(_Total)\Avg. Disk Queue Length" -SampleInterval 1 -MaxSamples 1 -ErrorAction SilentlyContinue
+          foreach ($sample in $counters.CounterSamples) {
+            $path = $sample.Path -replace '.*\\(.*)$', '$1'
+            Write-Output "COUNTER=$path VALUE=$($sample.CookedValue)"
+          }
+        } catch {
+          Write-Output "COUNTER=DiskBytesPerSec VALUE=0"
+          Write-Output "COUNTER=AvgDiskQueueLength VALUE=0"
+        }
+      register: io_stats_windows
+      changed_when: false
+
+    - name: "Store Windows metrics"
+      set_fact:
+        collected_disk_metrics: "{{ disk_stats_windows.stdout_lines }}"
+        collected_io_metrics: "{{ io_stats_windows.stdout_lines }}"
+        collected_inode_metrics: []
+
+  rescue:
+    - name: "Handle Windows metrics collection error"
+      debug:
+        msg: "Failed to collect Windows disk metrics: {{ ansible_failed_result.msg }}"
+      
+    - name: "Set empty metrics on error"
+      set_fact:
+        collected_disk_metrics: []
+        collected_io_metrics: []
+        collected_inode_metrics: []

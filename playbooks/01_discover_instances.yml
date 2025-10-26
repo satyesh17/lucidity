@@ -1,0 +1,43 @@
+---
+- name: "Discover EC2 Instances Across All Accounts"
+  hosts: localhost
+  gather_facts: true
+  vars:
+    discovered_instances_total: 0
+    
+  tasks:
+    - name: "Initialize discovery process"
+      debug:
+        msg: |
+          🔍 Starting EC2 instance discovery across accounts:
+          - Management Account: {{ management_account_id }}
+          - Dev Account: {{ dev_account_id }}
+
+    - name: "Discover instances in management account"
+      include_role:
+        name: cross_account_access
+      vars:
+        account_id: "{{ management_account_id }}"
+        account_name: "management"
+        account_role: "DiskMonitoringManagementRole"
+        regions: ["{{ aws_region }}"]
+
+    - name: "Discover instances in dev account"
+      include_role:
+        name: cross_account_access
+      vars:
+        account_id: "{{ dev_account_id }}"
+        account_name: "dev"
+        account_role: "DiskMonitoringCrossAccountRole"
+        regions: ["{{ aws_region }}"]
+
+    - name: "Display discovery summary"
+      debug:
+        msg: |
+          ✅ Instance discovery completed!
+          Total instances discovered: {{ groups['all'] | length - 1 }}
+          Linux instances: {{ groups['linux_instances'] | default([]) | length }}
+          Windows instances: {{ groups['windows_instances'] | default([]) | length }}
+          
+          Next step: Run CloudWatch Agent installation
+          Command: ansible-playbook playbooks/02_install_agents.yml -v

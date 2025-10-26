@@ -1,0 +1,35 @@
+---
+- name: "Collect Disk Metrics from All Instances"
+  hosts: linux_instances:windows_instances
+  gather_facts: true
+  serial: 10
+  
+  tasks:
+    - name: "Display metrics collection start"
+      debug:
+        msg: |
+          🔄 Starting metrics collection on:
+          - Instance ID: {{ instance_id }}
+          - Platform: {{ platform }}
+          - Account: {{ account_name }}
+
+    - name: "Collect disk metrics"
+      include_role:
+        name: disk_metrics_collection
+
+    - name: "Wait for metrics to be available in CloudWatch"
+      pause:
+        seconds: 30
+      run_once: true
+
+  post_tasks:
+    - name: "Metrics collection summary"
+      debug:
+        msg: |
+          ✅ Metrics collection completed!
+          
+          Metrics are being sent to CloudWatch namespace: {{ cloudwatch_namespace }}
+          
+          Next step: Create dashboard
+          Command: ansible-playbook playbooks/04_create_dashboard.yml -v
+      run_once: true
