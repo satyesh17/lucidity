@@ -1,6 +1,6 @@
 ```mermaid
 graph TB
-    subgraph "Management Account (741752824171)"
+    subgraph "Management Account"
         A[Ansible EC2 Instance] --> B[IAM Management Role]
         B --> C[DynamoDB Inventory]
         B --> D[S3 Config Bucket]
